@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "signal-server": "DEBUG=server node signal-server.start.js",
-    "test-datachannel-setup-flow": "env $(xargs<.env) node test-datachannel-setup-flow.js"
+    "test-datachannel-setup-flow": "env $(xargs<.env) node test-datachannel-setup-flow.js",
+    "test-datatransfer": "env $(xargs<.env) node test-datatransfer.js"
   },
   "keywords": [],
   "author": "",
