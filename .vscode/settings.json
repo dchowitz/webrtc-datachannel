@@ -1,0 +1,8 @@
+{
+  "editor.fontSize": 12,
+  // Place your settings in this file to overwrite default and user settings.
+  "editor.formatOnSave": true,
+  "prettier.eslintIntegration": true,
+  "prettier.printWidth": 80,
+  "git.ignoreLimitWarning": true
+}
