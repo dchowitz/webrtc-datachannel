@@ -8,6 +8,8 @@ const io = require('socket.io-client')
 
 const noop = () => {}
 
+let A, B
+
 const rtcConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -26,9 +28,12 @@ const rtcConfig = {
 
   const messagesSent = {}
   const messagesReceived = {}
+  let message = 0
+  const maxkB = 64
+  const sendDelayMs = 0
 
-  const A = await dataChannel({ signalServer })
-  const B = await dataChannel({ signalServer }, data => {
+  A = await dataChannel({ signalServer })
+  B = await dataChannel({ signalServer }, data => {
     if (typeof data === 'string') {
       if (data.length < 100) {
         debug('B got short string', data)
@@ -57,60 +62,76 @@ const rtcConfig = {
   await A.initiate(B.getId())
 
   debug('A sends short string message')
-
   A.send('hi from A')
 
   debug('A sends large string message')
+  A.send('x'.repeat(16 * 1024 * 1024))
 
-  A.send('x'.repeat(1024 * 1024))
+  // this fails (channel closes)
+  // debug('A sends another large string message')
+  // A.send('x'.repeat(256 * 1024 * 1024))
+
+  // this fails (channel closes)
+  // debug('A sends large byte array')
+  // A.send(new Uint8Array(256 * 1024 * 1024))
 
   debug('sending typed arrays of increasing size')
-
-  let message = 0
-  let kbyte = 1
-  let finished = false
-
-  setInterval(() => {
-    const size = kbyte * 1024
-    const data = new Uint8Array(size)
-    data.fill(message)
-    debug('A sends message', message, 'with', size, 'bytes')
-    A.send(data)
-    messagesSent[message] = size
-    kbyte = kbyte * 2
-    message++
-    finished = kbyte > 1024
-  }, 500)
-
-  await value(() => finished, 100000)
+  await new Promise((resolve, reject) => {
+    let kbyte = 1
+    const timer = setInterval(() => {
+      const size = kbyte * 1024
+      const data = new Uint8Array(size)
+      data.fill(message)
+      debug('A sends message', message, 'with', size, 'bytes')
+      if (!A.send(data)) {
+        clearInterval(timer)
+        reject(new Error('send failed'))
+      }
+      messagesSent[message] = size
+      kbyte = kbyte * 2
+      message++
+      if (kbyte > maxkB) {
+        clearInterval(timer)
+        resolve()
+      }
+    }, sendDelayMs)
+  })
 
   debug('sending buffers of increasing size')
-
-  kbyte = 1
-  finished = false
-
-  setInterval(() => {
-    const size = kbyte * 1024
-    const data = new Uint8Array(size)
-    data.fill(message)
-    debug('A sends message', message, 'with', size, 'bytes')
-    A.send(Buffer.from(data))
-    messagesSent[message] = size
-    kbyte = kbyte * 2
-    message++
-    finished = kbyte > 1024
-  }, 500)
-
-  await value(() => finished, 100000)
+  await new Promise((resolve, reject) => {
+    let kbyte = 1
+    const timer = setInterval(() => {
+      const size = kbyte * 1024
+      const data = new Uint8Array(size)
+      data.fill(message)
+      debug('A sends message', message, 'with', size, 'bytes')
+      if (!A.send(Buffer.from(data))) {
+        clearInterval(timer)
+        reject(new Error('send failed'))
+      }
+      messagesSent[message] = size
+      kbyte = kbyte * 2
+      message++
+      if (kbyte > maxkB) {
+        clearInterval(timer)
+        resolve()
+      }
+    }, sendDelayMs)
+  })
 
   // give messages chance to arrive
-  await new Promise(resolve => setTimeout(resolve, 1000))
+  await value(
+    () =>
+      !!messagesSent[message - 1] &&
+      messagesSent[message - 1] === messagesReceived[message - 1],
+    60 * 1000
+  )
 
   Object.keys(messagesSent).forEach(msg => {
     debug(
       'msg',
       msg,
-      'received',
+      'transferred',
       messagesSent[msg] === messagesReceived[msg] ? 'complete' : 'incomplete'
     )
   })
@@ -118,6 +139,8 @@ const rtcConfig = {
   .then(() => process.exit(0))
   .catch(e => {
     debug(e)
+    A.debugState()
+    B.debugState()
     process.exit(1)
   })
 
@@ -148,10 +171,10 @@ async function dataChannel (config, onData = noop) {
       debug(localId, 'got answer signal')
       try {
         connection.setRemoteDescription(data.signal.answer)
-        extractRemoteMaxMessageSize(data.signal.offer)
       } catch (e) {
         debug(localId, 'failed to set remote description', e)
       }
+      extractRemoteMaxMessageSize(data.signal.answer)
     } else if (data.signal.candidate) {
       debug(localId, 'got candidate signal')
       try {
@@ -211,42 +234,75 @@ async function dataChannel (config, onData = noop) {
     },
     send (message) {
       try {
+        debug(localId, 'bufferedAmount before send:', channel.bufferedAmount)
         channel.send(message)
+        setTimeout(
+          // give chance to update bufferedAmount async
+          () =>
+            debug(
+              localId,
+              'bufferedAmount after send:',
+              channel.bufferedAmount
+            ),
+          0
+        )
+        return true
       } catch (e) {
         debug(localId, 'sending message failed', e)
+        debugState()
+        return false
       }
+    },
+    debugState () {
+      debugState()
     }
   }
 
   function setupChannelListeners () {
-    channel.addEventListener('open', () => {
-      debug(localId, 'state', {
-        localDescription: connection.currentLocalDescription,
-        remoteDescription: connection.currentRemoteDescription,
-        iceConnectionState: connection.iceConnectionState,
-        connectionState: connection.connectionState,
-        signalingState: connection.signalingState,
-        channelState: channel.readyState,
-        sctpMaxMessageSize: connection.sctp && connection.sctp.maxMessageSize,
-        remoteMaxMessageSize
-      })
+    channel.addEventListener('open', debugState)
+    channel.addEventListener('close', debugState)
+    channel.addEventListener('error', e => {
+      debug(localId, 'channel error:', e)
+      debugState()
     })
-    channel.addEventListener('close', () =>
-      debug(localId, 'channel state:', channel.readyState)
-    )
-    channel.addEventListener('error', e => debug(localId, 'channel error:', e))
     channel.addEventListener('message', message => {
       // debug(myId, 'got channel message')
       onData(message.data)
     })
   }
 
+  function debugState () {
+    debug(localId, 'state', {
+      channelId: channel.id,
+      // localDescription: connection.currentLocalDescription,
+      // remoteDescription: connection.currentRemoteDescription,
+      iceConnectionState: connection.iceConnectionState,
+      connectionState: connection.connectionState,
+      signalingState: connection.signalingState,
+      channelState: channel.readyState,
+      channelBufferedAmount: channel.bufferedAmount,
+      sctpMaxMessageSize: connection.sctp && connection.sctp.maxMessageSize,
+      remoteMaxMessageSize
+    })
+  }
+
   // from: https://blog.mozilla.org/webrtc/large-data-channel-messages/
   function extractRemoteMaxMessageSize (description) {
     remoteMaxMessageSize = 65535
-    const match = description.sdp.match(/a=max-message-size:\s*(\d+)/)
-    if (match !== null && match.length >= 2) {
-      remoteMaxMessageSize = parseInt(match[1])
+    try {
+      const match = description.sdp.match(/a=max-message-size:\s*(\d+)/)
+      if (match !== null && match.length >= 2) {
+        remoteMaxMessageSize = parseInt(match[1])
+        debug(localId, 'got remoteMaxMessageSize from sdp prop')
+      }
+    } catch (e) {
+      debug(
+        localId,
+        'failed to extract remoteMaxMessageSize from',
+        description,
+        'error:',
+        e
+      )
     }
   }
 }
