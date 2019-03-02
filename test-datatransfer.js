@@ -6,6 +6,8 @@ const wrtc = require('wrtc')
 const debug = require('debug')('test')
 const io = require('socket.io-client')
 
+const noop = () => {}
+
 const rtcConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -22,10 +24,20 @@ const rtcConfig = {
   await new Promise(resolve => server.listen(port, resolve))
   const signalServer = 'http://localhost:' + port
 
+  let received = 0
+
   const A = await dataChannel({ signalServer })
-  const B = await dataChannel({ signalServer })
+  const B = await dataChannel({ signalServer }, data => {
+    received++
+  })
 
   await A.initiate(B.getId())
+
+  setInterval(() => {
+    A.send('AAA')
+  }, 1000)
+
+  await value(() => received === 3)
 })()
   .then(() => process.exit(0))
   .catch(e => {
@@ -33,7 +45,7 @@ const rtcConfig = {
     process.exit(1)
   })
 
-async function dataChannel (config) {
+async function dataChannel (config, onData = noop) {
   let myId, peerId, connection, channel
   const socket = io(config.signalServer)
 
@@ -118,6 +130,13 @@ async function dataChannel (config) {
       await value(
         () => connection && connection.connectionState === 'connected'
       )
+    },
+    send (message) {
+      try {
+        channel.send(message)
+      } catch (e) {
+        debug(myId, 'sending message failed', e)
+      }
     }
   }
 
@@ -138,6 +157,7 @@ async function dataChannel (config) {
     channel.addEventListener('error', e => debug(myId, 'channel error:', e))
     channel.addEventListener('message', data => {
       debug(myId, 'got channel message', data)
+      onData(data)
     })
   }
 }
