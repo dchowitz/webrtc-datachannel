@@ -32,8 +32,8 @@ const rtcConfig = {
   const maxkB = 64
   const sendDelayMs = 0
 
-  A = await dataChannel({ signalServer })
-  B = await dataChannel({ signalServer }, data => {
+  A = await dataChannel('A', { signalServer })
+  B = await dataChannel('B', { signalServer }, data => {
     if (typeof data === 'string') {
       if (data.length < 100) {
         debug('B got short string', data)
@@ -59,7 +59,7 @@ const rtcConfig = {
     }
   })
 
-  await A.initiate(B.getId())
+  await A.connect('B')
 
   debug('A sends short string message')
   A.send('hi from A')
@@ -144,12 +144,12 @@ const rtcConfig = {
     process.exit(1)
   })
 
-async function dataChannel (config, onData = noop) {
-  let localId, remoteId, connection, channel, remoteMaxMessageSize
-  const socket = io(config.signalServer)
+async function dataChannel (localPeerId, config, onData = noop) {
+  const localId = localPeerId
+  let remoteId, connection, channel, remoteMaxMessageSize
+  const socket = io(config.signalServer, { query: { peerId: localPeerId } })
 
   await new Promise(resolve => socket.on('connect', resolve))
-  localId = socket.id
 
   socket.on('signal', async data => {
     if (data.signal.offer) {
@@ -206,10 +206,7 @@ async function dataChannel (config, onData = noop) {
   })
 
   return {
-    getId () {
-      return localId
-    },
-    async initiate (othersPeerId) {
+    async connect (othersPeerId) {
       remoteId = othersPeerId
       channel = connection.createDataChannel({ ordered: true })
       channel.binaryType = 'arraybuffer'

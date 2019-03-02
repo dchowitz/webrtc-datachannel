@@ -26,19 +26,16 @@ const rtcConfig = {
   const port = await getPort()
   await new Promise(resolve => server.listen(port, resolve))
 
-  const peer1 = {}
-  peer1.socket = io('http://localhost:' + port)
+  const peer1 = { id: 'A' }
+  peer1.socket = io('http://localhost:' + port + '?peerId=' + peer1.id)
 
-  const peer2 = {}
-  peer2.socket = io('http://localhost:' + port)
+  const peer2 = { id: 'B' }
+  peer2.socket = io('http://localhost:' + port + '?peerId=' + peer2.id)
 
   await Promise.all([
     new Promise(resolve => peer1.socket.on('connect', resolve)),
     new Promise(resolve => peer2.socket.on('connect', resolve))
   ])
-
-  peer1.id = peer1.socket.id
-  peer2.id = peer2.socket.id
 
   debug('peer1 connected to socket', peer1.id)
   debug('peer2 connected to socket', peer2.id)
