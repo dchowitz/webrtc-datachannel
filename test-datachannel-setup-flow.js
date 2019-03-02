@@ -62,7 +62,7 @@ const rtcConfig = {
       const answer = await peer2.connection.createAnswer()
       peer2.connection.setLocalDescription(answer)
       peer2.socket.emit('signal', {
-        peerId: peer1.id,
+        to: peer1.id,
         signal: { answer }
       })
     } else if (data.signal.candidate) {
@@ -107,7 +107,7 @@ const rtcConfig = {
       return
     }
     peer1.socket.emit('signal', {
-      peerId: peer2.id,
+      to: peer2.id,
       signal: { candidate }
     })
   })
@@ -122,7 +122,7 @@ const rtcConfig = {
       return
     }
     peer2.socket.emit('signal', {
-      peerId: peer1.id,
+      to: peer1.id,
       signal: { candidate }
     })
   })
@@ -152,7 +152,7 @@ const rtcConfig = {
   debug('peer1 got offer:', offer)
 
   peer1.socket.emit('signal', {
-    peerId: peer2.id,
+    to: peer2.id,
     signal: { offer }
   })
 

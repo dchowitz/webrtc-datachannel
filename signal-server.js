@@ -3,7 +3,6 @@ var socketIo = require('socket.io')
 
 module.exports = function signalServer (serverToBind) {
   const peerIds = {} // dictionary by socket.id
-
   const io = socketIo(serverToBind)
 
   io.on('connection', socket => {
@@ -16,7 +15,7 @@ module.exports = function signalServer (serverToBind) {
     socket.emit('peers', getPeerIds())
 
     socket.on('signal', function (data) {
-      var receiverSocket = getSocketId(data.peerId) // TODO rename data.to
+      var receiverSocket = getSocketId(data.to)
       if (!receiverSocket) {
         // TODO let the sender know, that there is no peer (do we need a retry in getSocketId?)
         return
@@ -26,7 +25,7 @@ module.exports = function signalServer (serverToBind) {
 
       receiverSocket.emit('signal', {
         signal: data.signal,
-        peerId: peerId // TODO rename from
+        from: peerId
       })
     })
 

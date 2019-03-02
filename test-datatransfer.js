@@ -147,21 +147,21 @@ const rtcConfig = {
 async function dataChannel (localPeerId, config, onData = noop) {
   const localId = localPeerId
   let remoteId, connection, channel, remoteMaxMessageSize
-  const socket = io(config.signalServer, { query: { peerId: localPeerId } })
+  const socket = io(config.signalServer, { query: { peerId: localId } })
 
-  await new Promise(resolve => socket.on('connect', resolve))
+  await new Promise(resolve => socket.on('connect', resolve)) // TODO respect nodejs callback semantics
 
   socket.on('signal', async data => {
     if (data.signal.offer) {
       debug(localId, 'got offer signal')
-      remoteId = data.peerId
+      remoteId = data.from
       connection.setRemoteDescription(data.signal.offer)
       extractRemoteMaxMessageSize(data.signal.offer)
       try {
         const answer = await connection.createAnswer()
         connection.setLocalDescription(answer)
         socket.emit('signal', {
-          peerId: data.peerId,
+          to: remoteId,
           signal: { answer }
         })
       } catch (e) {
@@ -195,7 +195,7 @@ async function dataChannel (localPeerId, config, onData = noop) {
       return
     }
     socket.emit('signal', {
-      peerId: remoteId,
+      to: remoteId,
       signal: { candidate }
     })
   })
@@ -216,7 +216,7 @@ async function dataChannel (localPeerId, config, onData = noop) {
       connection.setLocalDescription(offer)
       debug(localId, 'got offer')
       socket.emit('signal', {
-        peerId: remoteId,
+        to: remoteId,
         signal: { offer }
       })
 
