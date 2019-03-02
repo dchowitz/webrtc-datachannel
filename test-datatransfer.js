@@ -24,6 +24,9 @@ const rtcConfig = {
   await new Promise(resolve => server.listen(port, resolve))
   const signalServer = 'http://localhost:' + port
 
+  const messagesSent = {}
+  const messagesReceived = {}
+
   const A = await dataChannel({ signalServer })
   const B = await dataChannel({ signalServer }, data => {
     if (typeof data === 'string') {
@@ -42,12 +45,10 @@ const rtcConfig = {
       toString.call(data) === '[object ArrayBuffer]'
     ) {
       const view = new Uint8Array(data)
-      debug(
-        'B got ArrayBuffer with',
-        data.byteLength,
-        'bytes from message',
-        view[0]
-      )
+      const message = view[0]
+      const length = data.byteLength
+      messagesReceived[message] = (messagesReceived[message] || 0) + length
+      debug('B got ArrayBuffer with', length, 'bytes from message', message)
     } else {
       debug('B got unknown type of data', data)
     }
@@ -55,24 +56,27 @@ const rtcConfig = {
 
   await A.initiate(B.getId())
 
-  // send short string message
+  debug('A sends short string message')
 
   A.send('hi from A')
 
-  // send large string message
+  debug('A sends large string message')
 
   A.send('x'.repeat(1024 * 1024))
 
-  // sending typed arrays of increasing size
+  debug('sending typed arrays of increasing size')
 
-  let message = 1
+  let message = 0
   let kbyte = 1
   let finished = false
 
   setInterval(() => {
-    const data = new Uint8Array(kbyte * 1024)
+    const size = kbyte * 1024
+    const data = new Uint8Array(size)
     data.fill(message)
+    debug('A sends message', message, 'with', size, 'bytes')
     A.send(data)
+    messagesSent[message] = size
     kbyte = kbyte * 2
     message++
     finished = kbyte > 1024
@@ -80,22 +84,36 @@ const rtcConfig = {
 
   await value(() => finished, 100000)
 
-  // sending buffers of increasing size
+  debug('sending buffers of increasing size')
 
-  message = 1
   kbyte = 1
   finished = false
 
   setInterval(() => {
-    const data = new Uint8Array(kbyte * 1024)
+    const size = kbyte * 1024
+    const data = new Uint8Array(size)
     data.fill(message)
+    debug('A sends message', message, 'with', size, 'bytes')
     A.send(Buffer.from(data))
+    messagesSent[message] = size
     kbyte = kbyte * 2
     message++
     finished = kbyte > 1024
   }, 500)
 
   await value(() => finished, 100000)
+
+  // give messages chance to arrive
+  await new Promise(resolve => setTimeout(resolve, 1000))
+
+  Object.keys(messagesSent).forEach(msg => {
+    debug(
+      'msg',
+      msg,
+      'received',
+      messagesSent[msg] === messagesReceived[msg] ? 'complete' : 'incomplete'
+    )
+  })
 })()
   .then(() => process.exit(0))
   .catch(e => {
@@ -103,18 +121,17 @@ const rtcConfig = {
     process.exit(1)
   })
 
-// todo adjust wording/prefixes: my -> local, peer/other... -> remote
 async function dataChannel (config, onData = noop) {
-  let myId, peerId, connection, channel, remoteMaxMessageSize
+  let localId, remoteId, connection, channel, remoteMaxMessageSize
   const socket = io(config.signalServer)
 
   await new Promise(resolve => socket.on('connect', resolve))
-  myId = socket.id
+  localId = socket.id
 
   socket.on('signal', async data => {
     if (data.signal.offer) {
-      debug(myId, 'got offer signal')
-      peerId = data.peerId
+      debug(localId, 'got offer signal')
+      remoteId = data.peerId
       connection.setRemoteDescription(data.signal.offer)
       extractRemoteMaxMessageSize(data.signal.offer)
       try {
@@ -125,61 +142,61 @@ async function dataChannel (config, onData = noop) {
           signal: { answer }
         })
       } catch (e) {
-        debug(myId, 'failed to set local description', e)
+        debug(localId, 'failed to set local description', e)
       }
     } else if (data.signal.answer) {
-      debug(myId, 'got answer signal')
+      debug(localId, 'got answer signal')
       try {
         connection.setRemoteDescription(data.signal.answer)
         extractRemoteMaxMessageSize(data.signal.offer)
       } catch (e) {
-        debug(myId, 'failed to set remote description', e)
+        debug(localId, 'failed to set remote description', e)
       }
     } else if (data.signal.candidate) {
-      debug(myId, 'got candidate signal')
+      debug(localId, 'got candidate signal')
       try {
         await connection.addIceCandidate(data.signal.candidate)
       } catch (e) {
-        debug(myId, 'failed to add ICE candidate', e)
+        debug(localId, 'failed to add ICE candidate', e)
       }
     } else {
-      debug(myId, 'got unknown signal', data.signal)
+      debug(localId, 'got unknown signal', data.signal)
     }
   })
 
   connection = new wrtc.RTCPeerConnection(rtcConfig)
   connection.addEventListener('icecandidate', async event => {
     const candidate = event.candidate
-    debug(myId, 'got ICE candidate:', candidate)
+    debug(localId, 'got ICE candidate:', candidate)
     if (candidate === null) {
       return
     }
     socket.emit('signal', {
-      peerId: peerId,
+      peerId: remoteId,
       signal: { candidate }
     })
   })
   connection.addEventListener('datachannel', event => {
-    debug(myId, 'received channel callback')
+    debug(localId, 'received channel callback')
     channel = event.channel
     setupChannelListeners()
   })
 
   return {
     getId () {
-      return myId
+      return localId
     },
     async initiate (othersPeerId) {
-      peerId = othersPeerId
+      remoteId = othersPeerId
       channel = connection.createDataChannel({ ordered: true })
       channel.binaryType = 'arraybuffer'
       setupChannelListeners()
 
       const offer = await connection.createOffer()
       connection.setLocalDescription(offer)
-      debug(myId, 'got offer')
+      debug(localId, 'got offer')
       socket.emit('signal', {
-        peerId: peerId,
+        peerId: remoteId,
         signal: { offer }
       })
 
@@ -196,14 +213,14 @@ async function dataChannel (config, onData = noop) {
       try {
         channel.send(message)
       } catch (e) {
-        debug(myId, 'sending message failed', e)
+        debug(localId, 'sending message failed', e)
       }
     }
   }
 
   function setupChannelListeners () {
     channel.addEventListener('open', () => {
-      debug(myId, 'state', {
+      debug(localId, 'state', {
         localDescription: connection.currentLocalDescription,
         remoteDescription: connection.currentRemoteDescription,
         iceConnectionState: connection.iceConnectionState,
@@ -215,9 +232,9 @@ async function dataChannel (config, onData = noop) {
       })
     })
     channel.addEventListener('close', () =>
-      debug(myId, 'channel state:', channel.readyState)
+      debug(localId, 'channel state:', channel.readyState)
     )
-    channel.addEventListener('error', e => debug(myId, 'channel error:', e))
+    channel.addEventListener('error', e => debug(localId, 'channel error:', e))
     channel.addEventListener('message', message => {
       // debug(myId, 'got channel message')
       onData(message.data)
