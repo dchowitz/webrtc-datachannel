@@ -24,20 +24,78 @@ const rtcConfig = {
   await new Promise(resolve => server.listen(port, resolve))
   const signalServer = 'http://localhost:' + port
 
-  let received = 0
-
   const A = await dataChannel({ signalServer })
   const B = await dataChannel({ signalServer }, data => {
-    received++
+    if (typeof data === 'string') {
+      if (data.length < 100) {
+        debug('B got short string', data)
+      } else {
+        debug(
+          'B got long string of',
+          data.length,
+          'characters containing',
+          data[0]
+        )
+      }
+    } else if (
+      data instanceof ArrayBuffer ||
+      toString.call(data) === '[object ArrayBuffer]'
+    ) {
+      const view = new Uint8Array(data)
+      debug(
+        'B got ArrayBuffer with',
+        data.byteLength,
+        'bytes from message',
+        view[0]
+      )
+    } else {
+      debug('B got unknown type of data', data)
+    }
   })
 
   await A.initiate(B.getId())
 
-  setInterval(() => {
-    A.send('AAA')
-  }, 1000)
+  // send short string message
 
-  await value(() => received === 3)
+  A.send('hi from A')
+
+  // send large string message
+
+  A.send('x'.repeat(1024 * 1024))
+
+  // sending typed arrays of increasing size
+
+  let message = 1
+  let kbyte = 1
+  let finished = false
+
+  setInterval(() => {
+    const data = new Uint8Array(kbyte * 1024)
+    data.fill(message)
+    A.send(data)
+    kbyte = kbyte * 2
+    message++
+    finished = kbyte > 1024
+  }, 500)
+
+  await value(() => finished, 100000)
+
+  // sending buffers of increasing size
+
+  message = 1
+  kbyte = 1
+  finished = false
+
+  setInterval(() => {
+    const data = new Uint8Array(kbyte * 1024)
+    data.fill(message)
+    A.send(Buffer.from(data))
+    kbyte = kbyte * 2
+    message++
+    finished = kbyte > 1024
+  }, 500)
+
+  await value(() => finished, 100000)
 })()
   .then(() => process.exit(0))
   .catch(e => {
@@ -45,8 +103,9 @@ const rtcConfig = {
     process.exit(1)
   })
 
+// todo adjust wording/prefixes: my -> local, peer/other... -> remote
 async function dataChannel (config, onData = noop) {
-  let myId, peerId, connection, channel
+  let myId, peerId, connection, channel, remoteMaxMessageSize
   const socket = io(config.signalServer)
 
   await new Promise(resolve => socket.on('connect', resolve))
@@ -57,6 +116,7 @@ async function dataChannel (config, onData = noop) {
       debug(myId, 'got offer signal')
       peerId = data.peerId
       connection.setRemoteDescription(data.signal.offer)
+      extractRemoteMaxMessageSize(data.signal.offer)
       try {
         const answer = await connection.createAnswer()
         connection.setLocalDescription(answer)
@@ -71,6 +131,7 @@ async function dataChannel (config, onData = noop) {
       debug(myId, 'got answer signal')
       try {
         connection.setRemoteDescription(data.signal.answer)
+        extractRemoteMaxMessageSize(data.signal.offer)
       } catch (e) {
         debug(myId, 'failed to set remote description', e)
       }
@@ -148,17 +209,28 @@ async function dataChannel (config, onData = noop) {
         iceConnectionState: connection.iceConnectionState,
         connectionState: connection.connectionState,
         signalingState: connection.signalingState,
-        channelState: channel.readyState
+        channelState: channel.readyState,
+        sctpMaxMessageSize: connection.sctp && connection.sctp.maxMessageSize,
+        remoteMaxMessageSize
       })
     })
     channel.addEventListener('close', () =>
       debug(myId, 'channel state:', channel.readyState)
     )
     channel.addEventListener('error', e => debug(myId, 'channel error:', e))
-    channel.addEventListener('message', data => {
-      debug(myId, 'got channel message', data)
-      onData(data)
+    channel.addEventListener('message', message => {
+      // debug(myId, 'got channel message')
+      onData(message.data)
     })
+  }
+
+  // from: https://blog.mozilla.org/webrtc/large-data-channel-messages/
+  function extractRemoteMaxMessageSize (description) {
+    remoteMaxMessageSize = 65535
+    const match = description.sdp.match(/a=max-message-size:\s*(\d+)/)
+    if (match !== null && match.length >= 2) {
+      remoteMaxMessageSize = parseInt(match[1])
+    }
   }
 }
 
