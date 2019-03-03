@@ -5,6 +5,26 @@ module.exports = function signalServer (serverToBind) {
   const peerIds = {} // dictionary by socket.id
   const io = socketIo(serverToBind)
 
+  io.use((socket, next) => {
+    const peerId = socket.handshake.query.peerId
+    debug('got peerId', peerId)
+
+    if (!/\w+/.test(peerId)) {
+      debug('invalid peerId')
+      return next(
+        new Error(`invalid peerId, only alphanumeric characters allowed`)
+      )
+    }
+
+    const socketId = getSocketId(socket.handshake.query.peerId)
+    if (socketId) {
+      debug('peerId already connected')
+      return next(new Error(`peer with id '${peerId}' already connected`))
+    }
+
+    return next()
+  })
+
   io.on('connection', socket => {
     const peerId = socket.handshake.query.peerId
     debug('new connection', socket.id, 'for peer', peerId)
