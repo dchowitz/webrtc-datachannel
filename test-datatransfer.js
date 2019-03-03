@@ -26,8 +26,8 @@ const rtcConfig = {
   await new Promise(resolve => server.listen(port, resolve))
   const signalServer = 'http://localhost:' + port
 
-  const messagesSent = {}
-  const messagesReceived = {}
+  const bytesSent = {}
+  const bytesReceived = {}
   let message = 0
   const maxkB = 64
   const sendDelayMs = 0
@@ -52,7 +52,7 @@ const rtcConfig = {
       const view = new Uint8Array(data)
       const message = view[0]
       const length = data.byteLength
-      messagesReceived[message] = (messagesReceived[message] || 0) + length
+      bytesReceived[message] = (bytesReceived[message] || 0) + length
       debug('B got ArrayBuffer with', length, 'bytes from message', message)
     } else {
       debug('B got unknown type of data', data)
@@ -67,14 +67,6 @@ const rtcConfig = {
   debug('A sends large string message')
   A.send('x'.repeat(16 * 1024 * 1024))
 
-  // this fails (channel closes)
-  // debug('A sends another large string message')
-  // A.send('x'.repeat(256 * 1024 * 1024))
-
-  // this fails (channel closes)
-  // debug('A sends large byte array')
-  // A.send(new Uint8Array(256 * 1024 * 1024))
-
   debug('sending typed arrays of increasing size')
   await new Promise((resolve, reject) => {
     let kbyte = 1
@@ -87,7 +79,7 @@ const rtcConfig = {
         clearInterval(timer)
         reject(new Error('send failed'))
       }
-      messagesSent[message] = size
+      bytesSent[message] = size
       kbyte = kbyte * 2
       message++
       if (kbyte > maxkB) {
@@ -109,7 +101,7 @@ const rtcConfig = {
         clearInterval(timer)
         reject(new Error('send failed'))
       }
-      messagesSent[message] = size
+      bytesSent[message] = size
       kbyte = kbyte * 2
       message++
       if (kbyte > maxkB) {
@@ -119,22 +111,30 @@ const rtcConfig = {
     }, sendDelayMs)
   })
 
-  // give messages chance to arrive
+  // wait for last message
   await value(
     () =>
-      !!messagesSent[message - 1] &&
-      messagesSent[message - 1] === messagesReceived[message - 1],
+      !!bytesSent[message - 1] &&
+      bytesSent[message - 1] === bytesReceived[message - 1],
     60 * 1000
   )
 
-  Object.keys(messagesSent).forEach(msg => {
+  Object.keys(bytesSent).forEach(msg => {
     debug(
       'msg',
       msg,
       'transferred',
-      messagesSent[msg] === messagesReceived[msg] ? 'complete' : 'incomplete'
+      bytesSent[msg] === bytesReceived[msg] ? 'complete' : 'incomplete'
     )
   })
+
+  debug('sending with sendAsync()')
+  do {
+    const size = 32 * 1024 + Math.floor(Math.random() * 32 * 1024)
+    const data = new Uint8Array(size)
+    debug('A sends message with', size, 'bytes')
+    await A.sendAsync(data)
+  } while (true)
 })()
   .then(() => process.exit(0))
   .catch(e => {
@@ -145,6 +145,9 @@ const rtcConfig = {
   })
 
 async function dataChannel (localPeerId, config, onData = noop) {
+  const MAX_MESSAGE_SIZE = 64 * 1024
+  const HIGH_WATERMARK = 1024 * 1024
+  const messageQueue = [] // of type {data, lengthInBytes, resolve, reject}
   const localId = localPeerId
   let remoteId, connection, channel, remoteMaxMessageSize
   const socket = io(config.signalServer, { query: { peerId: localId } })
@@ -202,7 +205,7 @@ async function dataChannel (localPeerId, config, onData = noop) {
   connection.addEventListener('datachannel', event => {
     debug(localId, 'received channel callback')
     channel = event.channel
-    setupChannelListeners()
+    setupChannel()
   })
 
   return {
@@ -210,7 +213,7 @@ async function dataChannel (localPeerId, config, onData = noop) {
       remoteId = othersPeerId
       channel = connection.createDataChannel({ ordered: true })
       channel.binaryType = 'arraybuffer'
-      setupChannelListeners()
+      setupChannel()
 
       const offer = await connection.createOffer()
       connection.setLocalDescription(offer)
@@ -250,12 +253,68 @@ async function dataChannel (localPeerId, config, onData = noop) {
         return false
       }
     },
+    sendAsync (message) {
+      const lengthInBytes = validateMessage(message)
+      return new Promise((resolve, reject) => {
+        messageQueue.push({ data: message, lengthInBytes, resolve, reject })
+        return sendAsyncInternal()
+      })
+    },
     debugState () {
       debugState()
     }
   }
 
-  function setupChannelListeners () {
+  async function sendAsyncInternal () {
+    const message = messageQueue.shift()
+    if (!message) {
+      debug(localId, 'message queue is empty')
+      return
+    }
+    const { data, lengthInBytes, resolve, reject } = message
+
+    // TODO check connection state and maybe signaling state too
+    if (channel.readyState !== 'open') {
+      await value(() => channel.readyState === 'open')
+    }
+    if (channel.readyState !== 'open') {
+      // TODO try to create a new datachannel
+      reject(new Error('datachannel is not open'))
+    }
+
+    // see sendData() in https://github.com/webrtc/samples/blob/gh-pages/src/content/datachannel/datatransfer/js/main.js
+    let bufferedAmount = channel.bufferedAmount
+    bufferedAmount += lengthInBytes
+    if (bufferedAmount >= HIGH_WATERMARK) {
+      // since event onbufferedamountlow is not fired, we retry after some delay
+      // 100 ms worked well during tests
+      setTimeout(() => sendAsyncInternal(), 100)
+      debug(
+        localId,
+        `did custom delay, bufferedAmount: ${bufferedAmount} (announced: ${
+          channel.bufferedAmount
+        })`
+      )
+      messageQueue.unshift(message) // back into the queue
+      return
+    }
+
+    try {
+      channel.send(data)
+      resolve()
+    } catch (e) {
+      reject(e)
+    }
+  }
+
+  function setupChannel () {
+    channel.bufferedAmountLowThreshold = MAX_MESSAGE_SIZE
+
+    channel.addEventListener('bufferedamountlow', e => {
+      // didn't see this fired, but leave it here, doesn't hurt
+      debug(localId, 'bufferedamountlow event', e)
+      sendAsyncInternal()
+    })
     channel.addEventListener('open', debugState)
     channel.addEventListener('close', debugState)
     channel.addEventListener('error', e => {
@@ -302,6 +361,32 @@ async function dataChannel (localPeerId, config, onData = noop) {
       )
     }
   }
+
+  function validateMessage (msg) {
+    if (!msg) return
+    let msgLength
+
+    if (typeof msg === 'string') {
+      msgLength = getStringByteLength(msg)
+    } else if (
+      // checks for Buffer, ArrayBuffer and typed arrays
+      msg instanceof Buffer ||
+      msg instanceof ArrayBuffer ||
+      msg.buffer instanceof ArrayBuffer
+    ) {
+      msgLength = msg.byteLength
+    } else {
+      throw new Error('unknown type of message')
+    }
+
+    if (msgLength > MAX_MESSAGE_SIZE) {
+      throw new Error(
+        `message too big, allowed are ${MAX_MESSAGE_SIZE} bytes, but message has ${msgLength} bytes`
+      )
+    }
+
+    return msgLength
+  }
 }
 
 function value (checkFn, timeout = 5000) {
@@ -320,4 +405,28 @@ function value (checkFn, timeout = 5000) {
       }
     }, 100)
   })
+}
+
+// from: https://codereview.stackexchange.com/questions/37512/count-byte-length-of-string
+function getStringByteLength (str) {
+  str = String(str)
+  let len = 0
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i)
+    len +=
+      c < 1 << 7
+        ? 1
+        : c < 1 << 11
+          ? 2
+          : c < 1 << 16
+            ? 3
+            : c < 1 << 21
+              ? 4
+              : c < 1 << 26
+                ? 5
+                : c < 1 << 31
+                  ? 6
+                  : Number.NaN
+  }
+  return len
 }

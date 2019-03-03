@@ -31,8 +31,12 @@ Once a channel closes (because of some error or due to `channel.close()`) there 
 
 A channel state of `closed` on one side of the channel doesn't necessarily mean that the state of the remote channel side is closed as well. In my experiments, when one side got an error and was closed, the other side showed still `open`.
 
+Event `onbufferedamountlow` never fires, but should...
+
 # Open Points
 
 **Task** Implement retries for `send()`. If the channel on one side closes, then we have to create a new one. The other side of the channel has to close the old one on `datachannel` event, if existing. We can also check the channel state before sending any messages and act accordingly. The abstraction for `send()` should return a Promise.
 
-**Task** Ensure that a send message always equals the received message, or put another way, that no chunking occurs. Since our data channel abstraction is still low-level, a custom (use case specific) protocol on top of it has to handle chunking and reassembling. For that, the `send()` implementation must reject messages greater than a certain size, e. g. 65 KB (see [Channel message size limitations]).
+**Task** Ensure that a send message always equals the received message, or put another way, that no chunking occurs. Since our data channel abstraction is still low-level, a custom (use case specific) protocol on top of it has to handle chunking and reassembling. For that, the `send()` implementation must reject messages greater than a certain size, e. g. 64 KB (see [Channel message size limitations]).
+
+**Q** What happens if the signalling resp. connection state changes, e. g. the address of one peer? Will the data channel be closed on both ends or is such situation handled transparently by WebRTC without affecting the current datachannel instance at all?
