@@ -4,8 +4,6 @@ const fixture = require('./signal-server.fixture')(test)
 const dataChannel = require('./dataChannel')
 const { poll } = require('./util')
 
-// TODO a.connect('unknown peerId') does not fail
-
 test('short string', async t => {
   let msg
   const a = await dataChannel('a', config())
@@ -16,6 +14,12 @@ test('short string', async t => {
   await a.sendAsync('hi from a')
   await poll(() => !!msg)
   t.is(msg, 'hi from a')
+})
+
+test('unknown remote peer', async t => {
+  const a = await dataChannel('a', config())
+  const error = await t.throwsAsync(a.connect('x'))
+  t.is(error.message, 'sending signal failed: unknown receiver')
 })
 
 test('max size string', async t => {

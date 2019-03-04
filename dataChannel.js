@@ -54,10 +54,7 @@ module.exports = async function dataChannel (
       try {
         const answer = await connection.createAnswer()
         connection.setLocalDescription(answer)
-        socket.emit('signal', {
-          to: remoteId,
-          signal: { answer }
-        })
+        await signal({ answer })
       } catch (e) {
         debug(localId, 'failed to set local description', e)
       }
@@ -87,10 +84,7 @@ module.exports = async function dataChannel (
     if (candidate === null) {
       return
     }
-    socket.emit('signal', {
-      to: remoteId,
-      signal: { candidate }
-    })
+    await signal({ candidate })
   })
   connection.addEventListener('datachannel', event => {
     debug(localId, 'received channel callback')
@@ -107,10 +101,7 @@ module.exports = async function dataChannel (
       const offer = await connection.createOffer()
       connection.setLocalDescription(offer)
       debug(localId, 'got offer')
-      socket.emit('signal', {
-        to: remoteId,
-        signal: { offer }
-      })
+      await signal({ offer })
       await poll(() => connection && connection.connectionState === 'connected')
     },
     async ready () {
@@ -188,6 +179,25 @@ module.exports = async function dataChannel (
     }
   }
 
+  function signal (sig) {
+    return new Promise((resolve, reject) => {
+      socket.emit(
+        'signal',
+        {
+          to: remoteId,
+          signal: sig
+        },
+        err => {
+          if (err) {
+            reject(new Error('sending signal failed: ' + err))
+          } else {
+            resolve()
+          }
+        }
+      )
+    })
+  }
+
   function setupChannel () {
     channel.bufferedAmountLowThreshold = MAX_MESSAGE_SIZE
     channel.addEventListener('bufferedamountlow', e => {
@@ -206,6 +216,7 @@ module.exports = async function dataChannel (
       onData(message.data)
     })
   }
+
   function debugState () {
     debug(localId, 'state', {
       channelId: channel.id,

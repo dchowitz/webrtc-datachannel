@@ -6,6 +6,7 @@ Based on https://github.com/webrtc/samples/blob/gh-pages/src/content/datachannel
 const getPort = require('get-port')
 const server = require('http').createServer()
 require('./signal-server')(server)
+const { poll } = require('./util')
 
 const wrtc = require('wrtc')
 const debug = require('debug')('test')
@@ -61,10 +62,14 @@ const rtcConfig = {
       peer2.connection.setRemoteDescription(data.signal.offer)
       const answer = await peer2.connection.createAnswer()
       peer2.connection.setLocalDescription(answer)
-      peer2.socket.emit('signal', {
-        to: peer1.id,
-        signal: { answer }
-      })
+      peer2.socket.emit(
+        'signal',
+        {
+          to: peer1.id,
+          signal: { answer }
+        },
+        () => {}
+      )
     } else if (data.signal.candidate) {
       try {
         await peer2.connection.addIceCandidate(data.signal.candidate)
@@ -106,10 +111,14 @@ const rtcConfig = {
     if (candidate === null) {
       return
     }
-    peer1.socket.emit('signal', {
-      to: peer2.id,
-      signal: { candidate }
-    })
+    peer1.socket.emit(
+      'signal',
+      {
+        to: peer2.id,
+        signal: { candidate }
+      },
+      () => {}
+    )
   })
 
   peer2.connection = new wrtc.RTCPeerConnection(rtcConfig)
@@ -121,10 +130,14 @@ const rtcConfig = {
     if (candidate === null) {
       return
     }
-    peer2.socket.emit('signal', {
-      to: peer1.id,
-      signal: { candidate }
-    })
+    peer2.socket.emit(
+      'signal',
+      {
+        to: peer1.id,
+        signal: { candidate }
+      },
+      () => {}
+    )
   })
 
   peer2.connection.addEventListener('datachannel', event => {
@@ -151,14 +164,18 @@ const rtcConfig = {
   peer1.connection.setLocalDescription(offer)
   debug('peer1 got offer:', offer)
 
-  peer1.socket.emit('signal', {
-    to: peer2.id,
-    signal: { offer }
-  })
+  peer1.socket.emit(
+    'signal',
+    {
+      to: peer2.id,
+      signal: { offer }
+    },
+    () => {}
+  )
 
   // waiting for established data channel
 
-  await value(
+  await poll(
     () => peer2.connection && peer2.connection.connectionState === 'connected'
   )
 })()
@@ -167,21 +184,3 @@ const rtcConfig = {
     debug(e)
     process.exit(1)
   })
-
-function value (checkFn, timeout = 5000) {
-  const start = Date.now()
-  return new Promise((resolve, reject) => {
-    let handle = setInterval(() => {
-      const elapsed = Date.now() - start
-      if (checkFn()) {
-        clearInterval(handle)
-        debug(`resolve value after ${elapsed} ms`)
-        resolve()
-      }
-      if (elapsed > timeout) {
-        clearInterval(handle)
-        reject(new Error('timeout'))
-      }
-    }, 100)
-  })
-}

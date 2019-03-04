@@ -1,7 +1,6 @@
 const getPort = require('get-port')
 let server = require('http').createServer()
 server = require('http-shutdown')(server)
-require('./signal-server')(server)
 
 module.exports = function (avaTest) {
   let serverUrl
@@ -15,6 +14,7 @@ module.exports = function (avaTest) {
   }
 
   async function openServerAsync () {
+    require('./signal-server')(server)
     const port = await getPort()
     await new Promise((resolve, reject) => {
       server.listen(port, err => {
@@ -29,6 +29,14 @@ module.exports = function (avaTest) {
 
   function closeServerAsync () {
     serverUrl = undefined
-    return new Promise(resolve => server.forceShutdown(resolve))
+    return new Promise((resolve, reject) =>
+      server.forceShutdown(err => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve()
+        }
+      })
+    )
   }
 }

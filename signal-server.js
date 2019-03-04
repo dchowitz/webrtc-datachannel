@@ -34,11 +34,10 @@ module.exports = function signalServer (serverToBind) {
     socket.broadcast.emit('peers', getPeerIds())
     socket.emit('peers', getPeerIds())
 
-    socket.on('signal', function (data) {
+    socket.on('signal', function (data, err) {
       var receiverSocket = getSocketId(data.to)
       if (!receiverSocket) {
-        // TODO let the sender know, that there is no peer (do we need a retry in getSocketId?)
-        return
+        return err('unknown receiver')
       }
       debug('proxying signal from peer %s to %s', peerId, data.peerId)
       debug(data.signal)
@@ -47,6 +46,8 @@ module.exports = function signalServer (serverToBind) {
         signal: data.signal,
         from: peerId
       })
+
+      err()
     })
 
     socket.on('disconnect', () => {
