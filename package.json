@@ -5,13 +5,15 @@
   "main": "index.js",
   "scripts": {
     "start": "DEBUG=server node signal-server.start.js",
+    "deploy": "git push heroku master",
+    "logs": "heroku logs -t",
     "test": "env $(xargs<.env.test) ava --serial --verbose **/*.test.js",
-    "signal-server": "DEBUG=server node signal-server.start.js",
     "test-datachannel-setup-flow": "env $(xargs<.env) node test-datachannel-setup-flow.js",
     "test-datatransfer": "env $(xargs<.env) node test-datatransfer.js",
     "mem-datatransfer": "env $(xargs<.env) memory-usage test-datatransfer.js",
     "web-build": "browserify dataChannel.js -s datachannel -d -o web/datachannel.js",
-    "web-run": "http-server ./web -o -c-1"
+    "web-local": "http-server ./web -o -c-1",
+    "web-deploy": "netlify deploy -d ./web --prod"
   },
   "keywords": [],
   "author": "",

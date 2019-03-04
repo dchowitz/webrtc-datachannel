@@ -6,14 +6,111 @@
   </head>
   <body>
     <h1>WebRTC datachannel test</h1>
-    <input id="localId" type="text" minlength="1" maxlength="4" />
-    <input id="remoteId" type="text" minlength="1" maxlength="4" />
+    <input
+      id="localId"
+      placeholder="localId"
+      type="text"
+      minlength="1"
+      maxlength="4"
+    />
+    <input
+      id="remoteId"
+      placeholder="remoteId"
+      type="text"
+      minlength="1"
+      maxlength="4"
+    />
     <button id="send">send</button>
     <button id="stop">stop</button>
-    <div id="status"></div>
+    <div id="status">
+      <div>packages sent: <span id="packagesSent"></span></div>
+      <div>bytes sent: <span id="bytesSent"></span></div>
+    </div>
+
     <script src="datachannel.js"></script>
     <script>
-      console.log(datachannel);
+      /*
+        localId -> connect, reset connection
+        remoteId -> start sending data, stop
+
+        show bytes send (amount, current transfer rate)
+        show bytes received (amount, current transfer rate)
+      */
+
+      var dc, localId, remoteId, sending;
+      var bytesSent, bytesReceived;
+      var packagesSent;
+      var package = "x".repeat(64536);
+
+      var sendButton = document.getElementById("send");
+      var stopButton = document.getElementById("stop");
+      var packagesSentText = document.getElementById("packagesSent");
+      var bytesSentText = document.getElementById("bytesSent");
+
+      updateUi();
+
+      document
+        .getElementById("localId")
+        .addEventListener("change", function(e) {
+          localId = e.target.value;
+          updateUi();
+          datachannel(localId, {
+            signalServer: "https://datachannel-signal-server.herokuapp.com",
+            wrtc: { RTCPeerConnection }
+          })
+            .then(result => {
+              console.log("got datachannel");
+              dc = result;
+              updateUi();
+            })
+            .catch(console.log);
+        });
+
+      document
+        .getElementById("remoteId")
+        .addEventListener("change", function(e) {
+          remoteId = e.target.value;
+          updateUi();
+        });
+
+      sendButton.addEventListener("click", function() {
+        sending = true;
+        bytesSent = 0;
+        packagesSent = 0;
+        updateUi();
+        dc.connect(remoteId)
+          .then(send)
+          .catch(console.log);
+      });
+
+      stopButton.addEventListener("click", function() {
+        sending = false;
+      });
+
+      function send() {
+        if (!dc) {
+          console.log("no datachannel");
+          return;
+        }
+        if (sending === false) {
+          return;
+        }
+        dc.sendAsync(package)
+          .then(() => {
+            bytesSent += package.length;
+            packagesSent++;
+            updateUi();
+            setTimeout(send, 0);
+          })
+          .catch(console.log);
+      }
+
+      function updateUi() {
+        sendButton.disabled = !dc || !remoteId || sending;
+        stopButton.disabled = !sending;
+        packagesSentText.innerText = packagesSent;
+        bytesSentText.innerText = bytesSent;
+      }
     </script>
     <script>
       window.foo = function() {
