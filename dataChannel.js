@@ -80,7 +80,7 @@ module.exports = async function dataChannel (
       debug(localId, 'got unknown signal', data.signal)
     }
   })
-  connection = new config.wrtc.RTCPeerConnection(rtcConfig)
+  connection = new config.wrtc.RTCPeerConnection(config.rtcConfig)
   connection.addEventListener('icecandidate', async event => {
     const candidate = event.candidate
     debug(localId, 'got ICE candidate:', candidate)

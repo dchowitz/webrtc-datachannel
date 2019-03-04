@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "ava --serial --verbose",
+    "test": "env $(xargs<.env.test) ava --serial --verbose **/*.test.js",
     "signal-server": "DEBUG=server node signal-server.start.js",
     "test-datachannel-setup-flow": "env $(xargs<.env) node test-datachannel-setup-flow.js",
     "test-datatransfer": "env $(xargs<.env) node test-datatransfer.js",
