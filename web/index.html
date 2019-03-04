@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>datachannel test</title>
+  </head>
+  <body>
+    <h1>WebRTC datachannel test</h1>
+    <input id="localId" type="text" minlength="1" maxlength="4" />
+    <input id="remoteId" type="text" minlength="1" maxlength="4" />
+    <button id="send">send</button>
+    <button id="stop">stop</button>
+    <div id="status"></div>
+    <script src="datachannel.js"></script>
+    <script>
+      console.log(datachannel);
+    </script>
+    <script>
+      window.foo = function() {
+        createPeer();
+
+        function createPeer() {
+          var socket = io("https://camjam-signal-server.herokuapp.com");
+
+          socket.on("connect", function() {
+            log("connected to signaling server, peer id: " + socket.id);
+          });
+
+          socket.on("peer", function(data) {
+            var peerId = data.peerId;
+            var initiator = data.initiator;
+
+            var peer = new SimplePeer({
+              initiator: initiator,
+              trickle: false,
+              config: {
+                iceServers: [
+                  { urls: "stun:stun.l.google.com:19302" },
+                  {
+                    urls: "turn:138.197.191.115:3478",
+                    username: "gorst",
+                    credential: "hero"
+                  }
+                ]
+              }
+            });
+
+            socket.on("signal", function(data) {
+              if (data.peerId === peerId) {
+                log("received signalling data from peer id: " + peerId);
+                peer.signal(data.signal);
+              }
+            });
+
+            peer.on("signal", function(data) {
+              log("advertising signalling data to peer id: " + peerId);
+              socket.emit("signal", {
+                signal: data,
+                peerId: peerId
+              });
+            });
+
+            peer.on("error", function(err) {
+              log("peer err", err);
+            });
+
+            peer.on("warning", function(err) {
+              log("peer warn", err);
+            });
+
+            peer.on("connect", function() {
+              log("peer connection established");
+              if (initiator) {
+                peer.send(1);
+              }
+            });
+
+            peer.on("data", function(data) {
+              var dataElem = document.getElementById("data");
+              dataElem.innerHTML = data;
+              setTimeout(function() {
+                peer.send(parseInt(data) + 1);
+              }, Math.floor(Math.random() * 2000) + 500);
+            });
+          });
+        }
+
+        function log() {
+          var logContainer = document.getElementById("log");
+          if (arguments) {
+            console.log(arguments);
+            try {
+              logContainer.innerHTML += "<br/>" + JSON.stringify(arguments);
+            } catch (err) {
+              logContainer.innerHTML += "<br/>log error";
+            }
+          }
+        }
+
+        function base64toBlob(base64Data, contentType) {
+          contentType = contentType || "";
+          var sliceSize = 1024;
+          var byteCharacters = atob(base64Data);
+          var bytesLength = byteCharacters.length;
+          var slicesCount = Math.ceil(bytesLength / sliceSize);
+          var byteArrays = new Array(slicesCount);
+
+          for (var sliceIndex = 0; sliceIndex < slicesCount; ++sliceIndex) {
+            var begin = sliceIndex * sliceSize;
+            var end = Math.min(begin + sliceSize, bytesLength);
+
+            var bytes = new Array(end - begin);
+            for (var offset = begin, i = 0; offset < end; ++i, ++offset) {
+              bytes[i] = byteCharacters[offset].charCodeAt(0);
+            }
+            byteArrays[sliceIndex] = new Uint8Array(bytes);
+          }
+          return new Blob(byteArrays, { type: contentType });
+        }
+      };
+    </script>
+  </body>
+</html>

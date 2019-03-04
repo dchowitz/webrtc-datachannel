@@ -11,3 +11,5 @@ yarn-error.log
 # configuration
 #
 .env*
+
+/web/datachannel.js
