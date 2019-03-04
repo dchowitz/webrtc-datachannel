@@ -1,4 +1,3 @@
-const wrtc = require('wrtc')
 const debug = require('debug')('datachannel')
 const io = require('socket.io-client')
 const { poll, getStringByteLength } = require('./util')
@@ -18,13 +17,31 @@ const rtcConfig = {
   ]
 }
 
-exports.dataChannel = async function dataChannel (
+module.exports = async function dataChannel (
   localPeerId,
   config,
   onData = noop
 ) {
-  const messageQueue = [] // of type {data, lengthInBytes, resolve, reject}
+  if (!localPeerId) {
+    throw new Error('peerId required')
+  }
+  if (!/^\w+$/.test(localPeerId)) {
+    throw new Error('peerId must be alphanumeric')
+  }
   const localId = localPeerId
+
+  config = {
+    rtcConfig,
+    ...config
+  }
+  if (!config.wrtc) {
+    throw new Error('config.wrtc required')
+  }
+  if (!config.signalServer) {
+    throw new Error('config.signalServer required')
+  }
+
+  const messageQueue = [] // of type {data, lengthInBytes, resolve, reject}
   let remoteId, connection, channel, remoteMaxMessageSize
   const socket = io(config.signalServer, { query: { peerId: localId } })
   await new Promise(resolve => socket.on('connect', resolve)) // TODO respect nodejs callback semantics
@@ -63,7 +80,7 @@ exports.dataChannel = async function dataChannel (
       debug(localId, 'got unknown signal', data.signal)
     }
   })
-  connection = new wrtc.RTCPeerConnection(rtcConfig)
+  connection = new config.wrtc.RTCPeerConnection(rtcConfig)
   connection.addEventListener('icecandidate', async event => {
     const candidate = event.candidate
     debug(localId, 'got ICE candidate:', candidate)
@@ -141,7 +158,7 @@ exports.dataChannel = async function dataChannel (
     const { data, lengthInBytes, resolve, reject } = message
     // TODO check connection state and maybe signaling state too
     if (channel.readyState !== 'open') {
-      await value(() => channel.readyState === 'open')
+      await poll(() => channel.readyState === 'open')
     }
     if (channel.readyState !== 'open') {
       // TODO try to create a new datachannel

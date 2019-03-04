@@ -1,14 +1,6 @@
 const test = require('ava')
-const getPort = require('get-port')
-let server = require('http').createServer()
-server = require('http-shutdown')(server)
+const fixture = require('./signal-server.fixture')(test)
 const io = require('socket.io-client')
-require('./signal-server')(server)
-
-let serverUrl
-
-test.beforeEach(openServerAsync)
-test.afterEach(closeServerAsync)
 
 test('connects two clients', async t => {
   const [A, B] = await Promise.all([getClientAsync('A'), getClientAsync('B')])
@@ -35,25 +27,8 @@ test('already connected peer', async t => {
   }
 })
 
-async function openServerAsync () {
-  const port = await getPort()
-  await new Promise((resolve, reject) => {
-    server.listen(port, err => {
-      if (err) reject(err)
-      else {
-        resolve()
-      }
-    })
-  })
-  serverUrl = 'http://localhost:' + port
-}
-
-function closeServerAsync () {
-  return new Promise(resolve => server.shutdown(resolve))
-}
-
 function getClientAsync (peerId) {
-  const socket = io(serverUrl, { query: { peerId } })
+  const socket = io(fixture.getServerUrl(), { query: { peerId } })
   return new Promise((resolve, reject) => {
     socket.on('connect', () => resolve(socket))
     socket.on('error', reject)

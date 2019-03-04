@@ -1,8 +1,9 @@
 const debug = require('debug')('test')
 const getPort = require('get-port')
+const wrtc = require('wrtc')
 const server = require('http').createServer()
 require('./signal-server')(server)
-const { dataChannel } = require('./dataChannel')
+const dataChannel = require('./dataChannel')
 const { poll } = require('./util')
 
 let A, B
@@ -17,8 +18,8 @@ let A, B
   const maxkB = 64
   const sendDelayMs = 0
 
-  A = await dataChannel('A', { signalServer })
-  B = await dataChannel('B', { signalServer }, data => {
+  A = await dataChannel('A', { signalServer, wrtc })
+  B = await dataChannel('B', { signalServer, wrtc }, data => {
     if (typeof data === 'string') {
       if (data.length < 100) {
         debug('B got short string', data)
