@@ -205,6 +205,7 @@ module.exports = async function dataChannel (
       debug(localId, 'bufferedamountlow event', e)
       sendAsyncInternal()
     })
+    // TODO set bufferedAmountLowThreshold and bufferedAmountLow callback in `open` handler (see sample)
     channel.addEventListener('open', debugState)
     channel.addEventListener('close', debugState)
     channel.addEventListener('error', e => {
