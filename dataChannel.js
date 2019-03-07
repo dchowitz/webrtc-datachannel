@@ -1,6 +1,6 @@
 const debug = require('debug')('datachannel')
 const io = require('socket.io-client')
-const { poll, getStringByteLength } = require('./util')
+const { poll, getStringByteLength, emitAsync } = require('./util')
 
 const noop = () => {}
 const MAX_MESSAGE_SIZE = 64 * 1024
@@ -17,19 +17,13 @@ const rtcConfig = {
   ]
 }
 
-module.exports = async function dataChannel (
-  localPeerId,
-  config,
-  onData = noop
-) {
-  if (!localPeerId) {
-    throw new Error('peerId required')
+module.exports = function dataChannel (channelId, config, onData = noop) {
+  if (!channelId) {
+    throw new Error('channelId required')
   }
-  if (!/^\w+$/.test(localPeerId)) {
-    throw new Error('peerId must be alphanumeric')
+  if (!/^\w+$/.test(channelId)) {
+    throw new Error('channelId must be alphanumeric')
   }
-  const localId = localPeerId
-
   config = {
     rtcConfig,
     ...config
@@ -37,113 +31,171 @@ module.exports = async function dataChannel (
   if (!config.wrtc) {
     throw new Error('config.wrtc required')
   }
-  if (!config.signalServer) {
-    throw new Error('config.signalServer required')
+  if (!config.signalServerUrl) {
+    throw new Error('config.signalServerUrl required')
   }
 
+  const ID = channelId
   const messageQueue = [] // of type {data, lengthInBytes, resolve, reject}
-  let remoteId, connection, channel, remoteMaxMessageSize
-  const socket = io(config.signalServer, { query: { peerId: localId } })
-  await new Promise(resolve => socket.on('connect', resolve)) // TODO respect nodejs callback semantics
-  socket.on('signal', async data => {
-    if (data.signal.offer) {
-      debug(localId, 'got offer signal')
-      remoteId = data.from
-      connection.setRemoteDescription(data.signal.offer)
-      extractRemoteMaxMessageSize(data.signal.offer)
-      try {
-        const answer = await connection.createAnswer()
-        connection.setLocalDescription(answer)
-        await signal({ answer })
-      } catch (e) {
-        debug(localId, 'failed to set local description', e)
-      }
-    } else if (data.signal.answer) {
-      debug(localId, 'got answer signal')
-      try {
-        connection.setRemoteDescription(data.signal.answer)
-      } catch (e) {
-        debug(localId, 'failed to set remote description', e)
-      }
-      extractRemoteMaxMessageSize(data.signal.answer)
-    } else if (data.signal.candidate) {
-      debug(localId, 'got candidate signal')
-      try {
-        await connection.addIceCandidate(data.signal.candidate)
-      } catch (e) {
-        debug(localId, 'failed to add ICE candidate', e)
-      }
-    } else {
-      debug(localId, 'got unknown signal', data.signal)
-    }
-  })
-  connection = new config.wrtc.RTCPeerConnection(config.rtcConfig)
-  connection.addEventListener('icecandidate', async event => {
-    const candidate = event.candidate
-    debug(localId, 'got ICE candidate:', candidate)
-    if (candidate === null) {
-      return
-    }
-    await signal({ candidate })
-  })
-  connection.addEventListener('datachannel', event => {
-    debug(localId, 'received channel callback')
-    channel = event.channel
-    setupChannel()
-  })
+  let channel, remoteMaxMessageSize
+  const connection = new config.wrtc.RTCPeerConnection(config.rtcConfig)
+  const socket = io(config.signalServerUrl)
 
-  return {
-    async connect (othersPeerId) {
-      remoteId = othersPeerId
-      channel = connection.createDataChannel({ ordered: true })
-      channel.binaryType = 'arraybuffer'
-      setupChannel()
-      const offer = await connection.createOffer()
-      connection.setLocalDescription(offer)
-      debug(localId, 'got offer')
-      await signal({ offer })
-      await poll(() => connection && connection.connectionState === 'connected')
-    },
-    async ready () {
-      await poll(() => connection && connection.connectionState === 'connected')
-    },
-    send (message) {
+  return new Promise(async (resolve, reject) => {
+    // signal server connection
+    await new Promise((resolve, reject) => {
+      socket.on('connect', () => resolve())
+      socket.on('error', e => reject(new Error(e)))
+    })
+    const localId = socket.id
+
+    // one of the two peers gets this event in order to initiate setup
+    socket.on('initiate', async channelId => {
+      debug(channelId, localId, 'got initiate')
+      if (channelId !== ID) return
+
       try {
-        debug(localId, 'bufferedAmount before send:', channel.bufferedAmount)
-        channel.send(message)
-        setTimeout(
-          // give chance to update bufferedAmount async
-          () =>
-            debug(
-              localId,
-              'bufferedAmount after send:',
-              channel.bufferedAmount
-            ),
-          0
-        )
-        return true
+        channel = connection.createDataChannel({ ordered: true })
+        setupChannel()
       } catch (e) {
-        debug(localId, 'sending message failed', e)
-        debugState()
-        return false
+        debug(channelId, localId, 'creating channel failed', e)
+        return reject(e)
       }
-    },
-    sendAsync (message) {
-      const lengthInBytes = validateMessage(message)
-      return new Promise((resolve, reject) => {
-        messageQueue.push({ data: message, lengthInBytes, resolve, reject })
-        return sendAsyncInternal()
-      })
-    },
-    debugState () {
-      debugState()
-    }
-  }
+
+      let offer
+      try {
+        offer = await connection.createOffer()
+        debug(channelId, localId, 'got offer')
+      } catch (e) {
+        debug(channelId, localId, 'creating offer failed', e)
+        return reject(e)
+      }
+
+      try {
+        connection.setLocalDescription(offer)
+      } catch (e) {
+        debug(channelId, localId, 'setting local description failed', e)
+        return reject(e)
+      }
+
+      socket.emit('signal', { channelId: ID, data: { offer } })
+    })
+
+    // listen to signal events
+    socket.on('signal', async ({ channelId, data }) => {
+      if (channelId !== ID) return
+
+      if (data.offer) {
+        debug(channelId, localId, 'got offer signal')
+        connection.setRemoteDescription(data.offer)
+        extractRemoteMaxMessageSize(data.offer)
+
+        let answer
+        try {
+          answer = await connection.createAnswer()
+        } catch (e) {
+          debug(channelId, localId, 'creating answer failed', e)
+          return reject(e)
+        }
+
+        try {
+          connection.setLocalDescription(answer)
+        } catch (e) {
+          debug(channelId, localId, 'failed to set local description', e)
+          return reject(e)
+        }
+
+        try {
+          socket.emit('signal', { channelId: ID, data: { answer } })
+        } catch (e) {
+          debug(channelId, localId, 'failed to send answer', e)
+          return reject(e)
+        }
+      } else if (data.answer) {
+        debug(channelId, localId, 'got answer signal')
+        try {
+          connection.setRemoteDescription(data.answer)
+          extractRemoteMaxMessageSize(data.answer)
+        } catch (e) {
+          debug(channelId, localId, 'failed to set remote description', e)
+          return reject(e)
+        }
+      } else if (data.candidate) {
+        debug(channelId, localId, 'got candidate signal')
+        try {
+          await connection.addIceCandidate(data.candidate)
+        } catch (e) {
+          debug(channelId, localId, 'failed to add ICE candidate', e)
+          return reject(e)
+        }
+      } else {
+        debug(channelId, localId, 'got unknown signal', data)
+      }
+    })
+
+    connection.addEventListener('icecandidate', event => {
+      const candidate = event.candidate
+      debug(channelId, localId, 'got ICE candidate:', candidate)
+      if (candidate === null) {
+        return
+      }
+      socket.emit('signal', { channelId: ID, data: { candidate } })
+    })
+
+    connection.addEventListener('datachannel', event => {
+      debug(channelId, localId, 'received channel callback')
+      channel = event.channel
+      setupChannel()
+    })
+
+    await emitAsync(socket, 'channel', ID)
+    await poll(() => connection && connection.connectionState === 'connected')
+
+    resolve({
+      send (message) {
+        try {
+          debug(
+            channelId,
+            localId,
+            'bufferedAmount before send:',
+            channel.bufferedAmount
+          )
+          channel.send(message)
+          setTimeout(
+            // give chance to update bufferedAmount async
+            () =>
+              debug(
+                channelId,
+                localId,
+                'bufferedAmount after send:',
+                channel.bufferedAmount
+              ),
+            0
+          )
+          return true
+        } catch (e) {
+          debug(channelId, localId, 'sending message failed', e)
+          debugState()
+          return false
+        }
+      },
+      sendAsync (message) {
+        const lengthInBytes = validateMessage(message)
+        return new Promise((resolve, reject) => {
+          messageQueue.push({ data: message, lengthInBytes, resolve, reject })
+          return sendAsyncInternal()
+        })
+      },
+      debugState () {
+        debugState()
+      }
+    })
+  })
 
   async function sendAsyncInternal () {
     const message = messageQueue.shift()
     if (!message) {
-      debug(localId, 'message queue is empty')
+      debug('message queue is empty')
       return
     }
     const { data, lengthInBytes, resolve, reject } = message
@@ -163,7 +215,6 @@ module.exports = async function dataChannel (
       // 100 ms worked well during tests
       setTimeout(() => sendAsyncInternal(), 100)
       debug(
-        localId,
         `did custom delay, bufferedAmount: ${bufferedAmount} (announced: ${
           channel.bufferedAmount
         })`
@@ -179,37 +230,19 @@ module.exports = async function dataChannel (
     }
   }
 
-  function signal (sig) {
-    return new Promise((resolve, reject) => {
-      socket.emit(
-        'signal',
-        {
-          to: remoteId,
-          signal: sig
-        },
-        err => {
-          if (err) {
-            reject(new Error('sending signal failed: ' + err))
-          } else {
-            resolve()
-          }
-        }
-      )
-    })
-  }
-
   function setupChannel () {
+    channel.binaryType = 'arraybuffer'
     channel.bufferedAmountLowThreshold = MAX_MESSAGE_SIZE
     channel.addEventListener('bufferedamountlow', e => {
       // didn't see this fired, but leave it here, doesn't hurt
-      debug(localId, 'bufferedamountlow event', e)
+      debug('bufferedamountlow event', e)
       sendAsyncInternal()
     })
     // TODO set bufferedAmountLowThreshold and bufferedAmountLow callback in `open` handler (see sample)
     channel.addEventListener('open', debugState)
     channel.addEventListener('close', debugState)
     channel.addEventListener('error', e => {
-      debug(localId, 'channel error:', e)
+      debug('channel error:', e)
       debugState()
     })
     channel.addEventListener('message', message => {
@@ -219,7 +252,7 @@ module.exports = async function dataChannel (
   }
 
   function debugState () {
-    debug(localId, 'state', {
+    debug('state', {
       channelId: channel.id,
       // localDescription: connection.currentLocalDescription,
       // remoteDescription: connection.currentRemoteDescription,
@@ -240,11 +273,10 @@ module.exports = async function dataChannel (
       const match = description.sdp.match(/a=max-message-size:\s*(\d+)/)
       if (match !== null && match.length >= 2) {
         remoteMaxMessageSize = parseInt(match[1])
-        debug(localId, 'got remoteMaxMessageSize from sdp prop')
+        debug('got remoteMaxMessageSize from sdp prop')
       }
     } catch (e) {
       debug(
-        localId,
         'failed to extract remoteMaxMessageSize from',
         description,
         'error:',

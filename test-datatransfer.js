@@ -10,7 +10,7 @@ let A, B
 ;(async () => {
   const port = await getPort()
   await new Promise(resolve => server.listen(port, resolve))
-  const signalServer = 'http://localhost:' + port
+  const signalServerUrl = 'http://localhost:' + port
 
   const bytesSent = {}
   const bytesReceived = {}
@@ -18,34 +18,34 @@ let A, B
   const maxkB = 64
   const sendDelayMs = 0
 
-  A = await dataChannel('A', { signalServer, wrtc })
-  B = await dataChannel('B', { signalServer, wrtc }, data => {
-    if (typeof data === 'string') {
-      if (data.length < 100) {
-        debug('B got short string', data)
+  const A = (await Promise.all([
+    dataChannel('A', { signalServerUrl, wrtc }),
+    dataChannel('A', { signalServerUrl, wrtc }, data => {
+      if (typeof data === 'string') {
+        if (data.length < 100) {
+          debug('B got short string', data)
+        } else {
+          debug(
+            'B got long string of',
+            data.length,
+            'characters containing',
+            data[0]
+          )
+        }
+      } else if (
+        data instanceof ArrayBuffer ||
+        toString.call(data) === '[object ArrayBuffer]'
+      ) {
+        const view = new Uint8Array(data)
+        const message = view[0]
+        const length = data.byteLength
+        bytesReceived[message] = (bytesReceived[message] || 0) + length
+        debug('B got ArrayBuffer with', length, 'bytes from message', message)
       } else {
-        debug(
-          'B got long string of',
-          data.length,
-          'characters containing',
-          data[0]
-        )
+        debug('B got unknown type of data', data)
       }
-    } else if (
-      data instanceof ArrayBuffer ||
-      toString.call(data) === '[object ArrayBuffer]'
-    ) {
-      const view = new Uint8Array(data)
-      const message = view[0]
-      const length = data.byteLength
-      bytesReceived[message] = (bytesReceived[message] || 0) + length
-      debug('B got ArrayBuffer with', length, 'bytes from message', message)
-    } else {
-      debug('B got unknown type of data', data)
-    }
-  })
-
-  await A.connect('B')
+    })
+  ]))[0]
 
   debug('A sends short string message')
   A.send('hi from A')
@@ -126,6 +126,5 @@ let A, B
   .catch(e => {
     debug(e)
     A.debugState()
-    B.debugState()
     process.exit(1)
   })
