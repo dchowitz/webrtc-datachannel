@@ -1,7 +1,7 @@
 const test = require('ava')
 const fixture = require('./signal-server.fixture')(test)
 const io = require('socket.io-client')
-const { poll } = require('./util')
+const { poll, emitAsync } = require('./util')
 
 test('initiate when two clients in same channel', async t => {
   let gotInitiate
@@ -92,14 +92,5 @@ function getClientAsync () {
   return new Promise((resolve, reject) => {
     socket.on('connect', () => resolve(socket))
     socket.on('error', e => reject(new Error(e)))
-  })
-}
-
-function emitAsync (client, event, data) {
-  return new Promise((resolve, reject) => {
-    client.emit(event, data, err => {
-      if (err) reject(new Error(err))
-      else resolve()
-    })
   })
 }

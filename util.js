@@ -15,6 +15,15 @@ exports.poll = function poll (checkFn, timeout = 5000) {
   })
 }
 
+exports.emitAsync = function emitAsync (client, event, data) {
+  return new Promise((resolve, reject) => {
+    client.emit(event, data, err => {
+      if (err) reject(new Error(err))
+      else resolve()
+    })
+  })
+}
+
 // from: https://codereview.stackexchange.com/questions/37512/count-byte-length-of-string
 exports.getStringByteLength = function getStringByteLength (str) {
   str = String(str)

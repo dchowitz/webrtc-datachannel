@@ -6,7 +6,7 @@ Based on https://github.com/webrtc/samples/blob/gh-pages/src/content/datachannel
 const getPort = require('get-port')
 const server = require('http').createServer()
 require('./signal-server')(server)
-const { poll } = require('./util')
+const { poll, emitAsync } = require('./util')
 
 const wrtc = require('wrtc')
 const debug = require('debug')('test')
@@ -27,57 +27,87 @@ const rtcConfig = {
   const port = await getPort()
   await new Promise(resolve => server.listen(port, resolve))
 
+  const CHANNEL = 'CHANNEL'
   const peer1 = { id: 'A' }
-  peer1.socket = io('http://localhost:' + port + '?peerId=' + peer1.id)
+  peer1.socket = io('http://localhost:' + port)
 
   const peer2 = { id: 'B' }
-  peer2.socket = io('http://localhost:' + port + '?peerId=' + peer2.id)
+  peer2.socket = io('http://localhost:' + port)
 
   await Promise.all([
-    new Promise(resolve => peer1.socket.on('connect', resolve)),
-    new Promise(resolve => peer2.socket.on('connect', resolve))
+    new Promise((resolve, reject) => {
+      peer1.socket.on('connect', () => resolve())
+      peer1.socket.on('error', e => reject(new Error(e)))
+    }),
+    new Promise((resolve, reject) => {
+      peer2.socket.on('connect', () => resolve())
+      peer2.socket.on('error', e => reject(new Error(e)))
+    })
   ])
 
-  debug('peer1 connected to socket', peer1.id)
-  debug('peer2 connected to socket', peer2.id)
+  debug('peer1 connected to signal server')
+  debug('peer2 connected to signal server')
 
-  peer1.socket.on('signal', async data => {
-    if (data.signal.answer) {
+  peer1.socket.on('initiate', async channelId => {
+    if (channelId !== CHANNEL) return
+
+    // peer1 is initiator for channel setup
+    const offer = await peer1.connection.createOffer()
+    peer1.connection.setLocalDescription(offer)
+    debug('peer1 got offer:', offer)
+
+    peer1.socket.emit(
+      'signal',
+      {
+        channelId: CHANNEL,
+        data: { offer }
+      },
+      () => {}
+    )
+  })
+
+  await emitAsync(peer1.socket, 'channel', CHANNEL)
+  await emitAsync(peer2.socket, 'channel', CHANNEL)
+
+  peer1.socket.on('signal', async ({ channelId, data }) => {
+    if (channelId !== CHANNEL) return
+    if (data.answer) {
       debug('peer1 got answer')
-      peer1.connection.setRemoteDescription(data.signal.answer)
-    } else if (data.signal.candidate) {
+      peer1.connection.setRemoteDescription(data.answer)
+    } else if (data.candidate) {
       try {
-        await peer1.connection.addIceCandidate(data.signal.candidate)
+        await peer1.connection.addIceCandidate(data.candidate)
       } catch (e) {
         debug('peer1 failed to add ICE candidate', e)
       }
     } else {
-      debug('peer1 got unknown signal', data.signal)
+      debug('peer1 got unknown signal', data)
     }
   })
 
-  peer2.socket.on('signal', async data => {
-    if (data.signal.offer) {
+  peer2.socket.on('signal', async ({ channelId, data }) => {
+    if (channelId !== CHANNEL) return
+    if (data.offer) {
       debug('peer2 got offer')
-      peer2.connection.setRemoteDescription(data.signal.offer)
+      peer2.connection.setRemoteDescription(data.offer)
       const answer = await peer2.connection.createAnswer()
       peer2.connection.setLocalDescription(answer)
       peer2.socket.emit(
         'signal',
         {
-          to: peer1.id,
-          signal: { answer }
+          channelId: CHANNEL,
+          data: { answer }
         },
         () => {}
       )
-    } else if (data.signal.candidate) {
+    } else if (data.candidate) {
       try {
-        await peer2.connection.addIceCandidate(data.signal.candidate)
+        await peer2.connection.addIceCandidate(data.candidate)
       } catch (e) {
         debug('peer2 failed to add ICE candidate', e)
       }
     } else {
-      debug('peer2 got unknown signal', data.signal)
+      debug('peer2 got unknown signal', data)
     }
   })
 
@@ -114,8 +144,8 @@ const rtcConfig = {
     peer1.socket.emit(
       'signal',
       {
-        to: peer2.id,
-        signal: { candidate }
+        channelId: CHANNEL,
+        data: { candidate }
       },
       () => {}
     )
@@ -133,8 +163,8 @@ const rtcConfig = {
     peer2.socket.emit(
       'signal',
       {
-        to: peer1.id,
-        signal: { candidate }
+        channelId: CHANNEL,
+        data: { candidate }
       },
       () => {}
     )
@@ -157,21 +187,6 @@ const rtcConfig = {
       signalingState: peer2.connection.signalingState
     })
   })
-
-  // peer1 is initiator for channel setup
-
-  const offer = await peer1.connection.createOffer()
-  peer1.connection.setLocalDescription(offer)
-  debug('peer1 got offer:', offer)
-
-  peer1.socket.emit(
-    'signal',
-    {
-      to: peer2.id,
-      signal: { offer }
-    },
-    () => {}
-  )
 
   // waiting for established data channel
 
