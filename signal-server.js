@@ -2,71 +2,39 @@ var debug = require('debug')('server')
 var socketIo = require('socket.io')
 
 module.exports = function signalServer (serverToBind) {
-  const peerIds = {} // dictionary by socket.id
   const io = socketIo(serverToBind)
 
-  io.use((socket, next) => {
-    const peerId = socket.handshake.query.peerId
-    debug('got peerId', peerId)
-
-    if (!/\w+/.test(peerId)) {
-      debug('invalid peerId')
-      return next(
-        new Error(`invalid peerId, only alphanumeric characters allowed`)
-      )
-    }
-
-    const socketId = getSocketId(socket.handshake.query.peerId)
-    if (socketId) {
-      debug('peerId already connected')
-      return next(new Error(`peer with id '${peerId}' already connected`))
-    }
-
-    return next()
-  })
-
   io.on('connection', socket => {
-    const peerId = socket.handshake.query.peerId
-    debug('new connection', socket.id, 'for peer', peerId)
-    peerIds[socket.id] = peerId
+    debug('new connection', socket.id)
 
-    // let all know of connected peers
-    socket.broadcast.emit('peers', getPeerIds())
-    socket.emit('peers', getPeerIds())
-
-    socket.on('signal', function (data, err) {
-      var receiverSocket = getSocketId(data.to)
-      if (!receiverSocket) {
-        return err('unknown receiver')
+    socket.on('channel', (channelId, fn) => {
+      if (!/\w+/.test(channelId)) {
+        debug('invalid channelId')
+        return fn('invalid channelId')
       }
-      debug('proxying signal from peer %s to %s', peerId, data.peerId)
-      debug(data.signal)
-
-      receiverSocket.emit('signal', {
-        signal: data.signal,
-        from: peerId
+      io.in(channelId).clients((err, clients) => {
+        if (err) {
+          return fn(err)
+        }
+        if (clients.length > 1) {
+          return fn('max clients reached for channel ' + channelId)
+        }
+        socket.join(channelId)
+        if (clients.length === 1) {
+          debug('channel', channelId, 'complete')
+          socket.to(clients[0]).emit('initiate', channelId)
+        }
+        return fn()
       })
+    })
 
-      err()
+    socket.on('signal', ({ channelId, data }) => {
+      debug('channel', channelId, 'proxy signal', data, 'from', socket.id)
+      socket.broadcast.to(channelId).emit('signal', { channelId, data })
     })
 
     socket.on('disconnect', () => {
-      debug('disconnect', socket.id, '(peer', peerIds[socket.id], ')')
-      delete peerIds[socket.id]
-
-      // let others know of connected peers
-      socket.broadcast.emit('peers', getPeerIds())
+      debug('disconnect', socket.id)
     })
   })
-
-  function getPeerIds () {
-    return Object.keys(peerIds).map(socketId => peerIds[socketId])
-  }
-
-  function getSocketId (peerId) {
-    var socketId = Object.keys(peerIds).find(
-      socketId => peerIds[socketId] === peerId
-    )
-    return socketId && io.sockets.connected[socketId]
-  }
 }
