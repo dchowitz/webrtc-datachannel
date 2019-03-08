@@ -12,6 +12,6 @@ yarn-error.log
 #
 .env*
 
-/web/datachannel.js
+/web/dist
 
 /.netlify
