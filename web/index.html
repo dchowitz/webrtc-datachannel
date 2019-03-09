@@ -28,14 +28,12 @@
           }
         ]
       };
-      const peerIds = [..."ABCDE"];
+      const channelIds = [..."ABCDE"];
       const initialState = {
         package: undefined,
-        localPeer: undefined,
-        unconnectedChannel: undefined,
         connection: {
+          channelId: undefined,
           channel: undefined,
-          remotePeer: undefined,
           sending: false,
           outCount: 0,
           inCount: 0
@@ -52,20 +50,26 @@
           this.state = initialState;
         }
 
-        createDataChannel = peerId =>
-          datachannel(
-            peerId,
+        connect = channelId => {
+          this.setState({
+            info: "connecting to " + channelId,
+            connection: {
+              ...this.state.connection,
+              channelId
+            }
+          });
+          return datachannel(
+            channelId,
             {
               rtcConfig,
               wrtc: { RTCPeerConnection },
-              signalServer: "https://datachannel-signal-server.herokuapp.com"
+              signalServerUrl: "https://datachannel-signal-server.herokuapp.com"
             },
             data => {
               if (!this.inSpeedometer) {
                 this.inSpeedometer = getSpeedo()(5);
               }
               const pno = this.state.connection.inCount + 1;
-              const sender = data[0];
               this.setState({
                 connection: {
                   ...this.state.connection,
@@ -73,46 +77,24 @@
                 },
                 incoming: `got ${prettyBytes(
                   pno * data.length
-                )} from ${sender} at ${prettyBytes(
+                )} from ${channelId} at ${prettyBytes(
                   this.inSpeedometer(data.length)
                 )}`
               });
             }
-          ).then(dc => {
-            this.setState({
-              connection: {
-                ...this.state.connection,
-                channel: dc
-              },
-              package: peerId.repeat(64 * 1024),
-              info: "datachannel ready"
-            });
-          });
-
-        setLocalPeer = peerId => {
-          this.setState({ localPeer: peerId, info: "creating datachannel" });
-          this.createDataChannel(peerId).catch(e =>
-            this.setState({ error: e.message })
-          );
-        };
-
-        connectWith = remotePeer => {
-          console.log(this.state.connection);
-          if (this.state.connection.channel) {
-            this.setState({ info: "connecting with " + remotePeer });
-            this.state.connection.channel
-              .connect(remotePeer)
-              .then(() => {
-                this.setState({
-                  info: "connected with " + remotePeer,
-                  connection: {
-                    ...this.state.connection,
-                    remotePeer: remotePeer
-                  }
-                });
-              })
-              .catch(e => this.setState({ error: e.message }));
-          }
+          )
+            .then(dc => {
+              this.setState({
+                connection: {
+                  ...this.state.connection,
+                  channelId,
+                  channel: dc
+                },
+                package: channelId.repeat(64 * 1024),
+                info: "datachannel ready"
+              });
+            })
+            .catch(e => this.setState({ error: e.message }));
         };
 
         startSending = () => {
@@ -171,37 +153,26 @@
         render() {
           return (
             <div>
-              {!this.state.localPeer && (
+              {!this.state.connection.channelId && (
                 <h3 className="mr2">
-                  Select local peer ID,&nbsp;
-                  {peerIds.map(i => (
-                    <button key={i} onClick={() => this.setLocalPeer(i)}>
+                  Select channel ID,&nbsp;
+                  {channelIds.map(i => (
+                    <button key={i} onClick={() => this.connect(i)}>
                       {i}
                     </button>
                   ))}
                 </h3>
               )}
-              {this.state.localPeer && (
+              {this.state.connection.channelId &&
+                !this.state.connection.channel && (
+                  <h3>
+                    Connecting to channel {this.state.connection.channelId}
+                  </h3>
+                )}
+              {this.state.connection.channel && (
                 <div>
                   <h3>
-                    This is peer {this.state.localPeer}
-                    {!this.state.connection.remotePeer && (
-                      <React.Fragment>
-                        <span>, connect with&nbsp;</span>
-                        {peerIds
-                          .filter(i => i !== this.state.localPeer)
-                          .map(i => (
-                            <button key={i} onClick={() => this.connectWith(i)}>
-                              {i}
-                            </button>
-                          ))}
-                      </React.Fragment>
-                    )}
-                    {this.state.connection.remotePeer && (
-                      <span>
-                        , connected with {this.state.connection.remotePeer}
-                      </span>
-                    )}
+                    Connected to channel {this.state.connection.channelId}
                   </h3>
                   <div className="code mid-gray mt2">
                     {this.state.outgoing || "no outgoing traffic"}
@@ -213,19 +184,16 @@
                   <div className="mt2" className="code red">
                     {this.state.error}
                   </div>
-                  {this.state.connection.remotePeer &&
-                    !this.state.connection.sending &&
-                    this.state.connection.channel && (
-                      <button className="mt2 mr2" onClick={this.startSending}>
-                        Start Sending
-                      </button>
-                    )}
-                  {this.state.connection.sending &&
-                    this.state.connection.channel && (
-                      <button className="mt2 mr2" onClick={this.stopSending}>
-                        Stop Sending
-                      </button>
-                    )}
+                  {!this.state.connection.sending && (
+                    <button className="mt2 mr2" onClick={this.startSending}>
+                      Start Sending
+                    </button>
+                  )}
+                  {this.state.connection.sending && (
+                    <button className="mt2 mr2" onClick={this.stopSending}>
+                      Stop Sending
+                    </button>
+                  )}
                   <button className="mt2" onClick={this.reset}>
                     Reset
                   </button>
