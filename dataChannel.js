@@ -148,8 +148,19 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
       setupChannel()
     })
 
-    await emitAsync(socket, 'channel', ID)
-    await poll(() => connection && connection.connectionState === 'connected')
+    try {
+      await emitAsync(socket, 'channel', ID)
+    } catch (e) {
+      debug(channelId, localId, 'joining datachannel failed', e)
+      reject(e)
+    }
+
+    try {
+      await poll(() => connection && connection.connectionState === 'connected')
+    } catch (e) {
+      debug(channelId, localId, 'no remote peer connected', e)
+      reject(new Error('connection timeout'))
+    }
 
     resolve({
       send (message) {
@@ -246,7 +257,6 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
       debugState()
     })
     channel.addEventListener('message', message => {
-      // debug(myId, 'got channel message')
       onData(message.data)
     })
   }

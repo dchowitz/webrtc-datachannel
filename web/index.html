@@ -180,10 +180,6 @@
                   <div className="code mid-gray mt2">
                     {this.state.incoming || "no incoming traffic"}
                   </div>
-                  <div className="code mid-gray mt2">{this.state.info}</div>
-                  <div className="mt2" className="code red">
-                    {this.state.error}
-                  </div>
                   {!this.state.connection.sending && (
                     <button className="mt2 mr2" onClick={this.startSending}>
                       Start Sending
@@ -199,6 +195,10 @@
                   </button>
                 </div>
               )}
+              <div className="code mid-gray mt2">{this.state.info}</div>
+              <div className="mt2" className="code red">
+                {this.state.error}
+              </div>
             </div>
           );
         }
