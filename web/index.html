@@ -62,7 +62,11 @@
             channelId,
             {
               rtcConfig,
-              wrtc: { RTCPeerConnection },
+              wrtc: {
+                RTCPeerConnection,
+                RTCIceCandidate,
+                RTCSessionDescription
+              },
               signalServerUrl: "https://datachannel-signal-server.herokuapp.com"
             },
             data => {
