@@ -55,7 +55,7 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
       if (channelId !== ID) return
 
       try {
-        channel = connection.createDataChannel({ ordered: true })
+        channel = connection.createDataChannel(channelId, { ordered: true })
         setupChannel()
       } catch (e) {
         debug(channelId, localId, 'creating channel failed', e)
@@ -87,7 +87,9 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
 
       if (data.offer) {
         debug(channelId, localId, 'got offer signal')
-        connection.setRemoteDescription(data.offer)
+        connection.setRemoteDescription(
+          new config.wrtc.RTCSessionDescription(data.offer)
+        )
         extractRemoteMaxMessageSize(data.offer)
 
         let answer
@@ -114,7 +116,9 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
       } else if (data.answer) {
         debug(channelId, localId, 'got answer signal')
         try {
-          connection.setRemoteDescription(data.answer)
+          connection.setRemoteDescription(
+            new config.wrtc.RTCSessionDescription(data.answer)
+          )
           extractRemoteMaxMessageSize(data.answer)
         } catch (e) {
           debug(channelId, localId, 'failed to set remote description', e)
@@ -123,7 +127,9 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
       } else if (data.candidate) {
         debug(channelId, localId, 'got candidate signal')
         try {
-          await connection.addIceCandidate(data.candidate)
+          await connection.addIceCandidate(
+            new config.wrtc.RTCIceCandidate(data.candidate)
+          )
         } catch (e) {
           debug(channelId, localId, 'failed to add ICE candidate', e)
           return reject(e)
@@ -156,7 +162,7 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
     }
 
     try {
-      await poll(() => connection && connection.connectionState === 'connected')
+      await poll(() => channel && channel.readyState === 'open', 10000)
     } catch (e) {
       debug(channelId, localId, 'no remote peer connected', e)
       reject(new Error('connection timeout'))
