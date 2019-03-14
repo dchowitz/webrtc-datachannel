@@ -1,8 +1,8 @@
 {
-  "name": "webrtc-datachannel",
+  "name": "@dchowitz/webrtc-datachannel",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "WebRTC datachannel abstraction including a signal server",
+  "main": "dataChannel.js",
   "scripts": {
     "start": "DEBUG=server node signal-server.start.js",
     "deploy": "git push heroku master",
@@ -15,9 +15,14 @@
     "web-local": "npm run web-build -- --watch",
     "web-deploy": "npm run web-build && netlify deploy -d ./web/dist --prod"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "WebRTC",
+    "datachannel",
+    "signal"
+  ],
+  "author": "dchowitz <denny.christochowitz@gmail.com>",
+  "repository": "dchowitz/webrtc-datachannel",
+  "license": "MIT",
   "devDependencies": {
     "ava": "^1.3.1",
     "browser-sync": "^2.26.3",
