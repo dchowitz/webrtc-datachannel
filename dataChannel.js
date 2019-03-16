@@ -7,17 +7,6 @@ const noop = () => {}
 const MAX_MESSAGE_SIZE = 64 * 1024
 const HIGH_WATERMARK = 1024 * 1024
 
-const rtcConfig = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    {
-      urls: process.env.turnserver,
-      username: process.env.turnuser,
-      credential: process.env.turnpassword
-    }
-  ]
-}
-
 module.exports = function dataChannel (channelId, config, onData = noop) {
   if (!channelId) {
     throw new Error('channelId required')
@@ -27,7 +16,9 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
   }
 
   config = {
-    rtcConfig,
+    rtcConfig: {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    },
     wrtc: getBrowserRtc(),
     ...config
   }

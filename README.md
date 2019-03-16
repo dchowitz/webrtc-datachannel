@@ -19,34 +19,32 @@ npm install @dchowitz/webrtc-datachannel
 Peers A and B want to exchange arbitrary data with each other. By some other means (your application logic), they have agreed upon a unique identifier for their datachannel connection.
 
 ```js
-const peerA = await datachannel('CHANNELID', {
-  // required
-  signalServerUrl: 'http://localhost:3333',
-  // optional, ICE config, you should provide your own TURN server
+const peerA = await datachannel(
+  "CHANNELID",
   {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      {
-        urls: 'turn:your.turnserver.com:3478',
-        username: 'turnuser',
-        credential: 'turnpassword'
-      }
-    ]
+    signalServerUrl: "http://localhost:3333"
+  },
+  data => {
+    // do something with incoming data
   }
-}, data => {
-  // do something with incoming data
-})
+);
 
 // ... somewhere else peer B
-const peerB = await datachannel('CHANNELID', { /*...config*/} , data => {
-  // do something with incoming data
-})
+const peerB = await datachannel(
+  "CHANNELID",
+  {
+    /*...config*/
+  },
+  data => {
+    // do something with incoming data
+  }
+);
 
 // when channel is ready, both peers can send to each other
-await peerA.send('hello from A')
+await peerA.send("hello from A");
 
 // ... somewhere else
-await peerB.send('hi back')
+await peerB.send("hi back");
 ```
 
 ### Non-browser environments
@@ -69,6 +67,36 @@ const peer = await datachannel("CHANNELID", {
 });
 ```
 
+### Configuration
+
+webrtc-datachannel uses a public Google STUN server by default. You can override the default behavior by providing a `rtcConfig` object in the configuration, e.g.:
+
+```js
+const peer = await datachannel("CHANNELID", {
+  signalServerUrl: "...",
+  rtcConfig: {
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  }
+});
+```
+
+The `rtcConfig` object follows the [RTCConfiguration in the W3C specification](https://cdn.rawgit.com/w3c/webrtc-pc/f4061e8ad0be1b849c863a01ebc391669d92d7f2/webrtc.html#dom-rtcconfiguration). In the `iceServers` array you can pass the STUN and TURN servers to be used when establishing a connection with a remote peer. While a STUN server alone is able to establish connections for most network situations, a TURN (relay) server is required for peers behind very restrictive firewalls or in other specific network situations. Due to their nature as a data relay and costs associated with this, TURN servers are not for free. You can run your own (e.g. [coturn](https://github.com/coturn/coturn)) or pay for one.
+
+A configuration with both STUN and TURN servers looks like this:
+
+```json
+{
+  "iceServers": [
+    { "urls": "stun:stun.l.google.com:19302" },
+    {
+      "urls": "turn:your.turnserver.com",
+      "username": "turnuser",
+      "credential": "turnpassword"
+    }
+  ]
+}
+```
+
 ## References
 
 - [Determine max message size](https://blog.mozilla.org/webrtc/large-data-channel-messages/)
@@ -79,6 +107,8 @@ const peer = await datachannel("CHANNELID", {
 ## Limitations
 
 Currently, max. message size is 64KB. This is to prevent chunking of big messages on receiver side. If you want to support messages of arbitrary side, you have to implement a protocol on top of webrtc-datachannel. This is planned for the future.
+
+Only strings, typed arrays and buffers can be send. Sending arbitrary JS objects is not supported yet.
 
 ## Observations
 
