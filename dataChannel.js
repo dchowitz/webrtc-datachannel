@@ -1,5 +1,6 @@
 const debug = require('debug')('datachannel')
 const io = require('socket.io-client')
+const getBrowserRtc = require('get-browser-rtc')
 const { poll, getStringByteLength, emitAsync } = require('./util')
 
 const noop = () => {}
@@ -24,12 +25,14 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
   if (!/^\w+$/.test(channelId)) {
     throw new Error('channelId must be alphanumeric')
   }
+
   config = {
     rtcConfig,
+    wrtc: getBrowserRtc(),
     ...config
   }
   if (!config.wrtc) {
-    throw new Error('config.wrtc required')
+    throw new Error('no browser, config.wrtc required')
   }
   if (!config.signalServerUrl) {
     throw new Error('config.signalServerUrl required')

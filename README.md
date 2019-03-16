@@ -18,12 +18,6 @@ Peers A and B want to exchange arbitrary data with each other. By some other mea
 
 ```js
 const peerA = await datachannel('CHANNELID', {
-  // required, WebRTC implementation to use (required for nodejs)
-  wrtc: {
-    RTCPeerConnection,
-    RTCSessionDescription,
-    RTCIceCandidate
-  },
   // required
   signalServerUrl: "http://localhost:3333",
   // optional, ICE config, you should provide your own TURN server

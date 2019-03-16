@@ -22,7 +22,7 @@ test('requires config.wrtc', t => {
   const error = t.throws(() =>
     dataChannel('A', { signalServerUrl: fixture.getServerUrl() })
   )
-  t.is(error.message, 'config.wrtc required')
+  t.is(error.message, 'no browser, config.wrtc required')
 })
 
 test('requires config.signalServerUrl', t => {

@@ -6,7 +6,7 @@ require('./signal-server')(server)
 const dataChannel = require('./dataChannel')
 const { poll } = require('./util')
 
-let A, B
+let A
 ;(async () => {
   const port = await getPort()
   await new Promise(resolve => server.listen(port, resolve))
