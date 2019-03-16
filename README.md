@@ -6,6 +6,8 @@ Signal server included.
 
 Still in its early stage.
 
+Runs in browsers, Node.js and React Native apps.
+
 ## Install
 
 ```bash
@@ -19,7 +21,7 @@ Peers A and B want to exchange arbitrary data with each other. By some other mea
 ```js
 const peerA = await datachannel('CHANNELID', {
   // required
-  signalServerUrl: "http://localhost:3333",
+  signalServerUrl: 'http://localhost:3333',
   // optional, ICE config, you should provide your own TURN server
   {
     iceServers: [
@@ -45,6 +47,26 @@ await peerA.send('hello from A')
 
 // ... somewhere else
 await peerB.send('hi back')
+```
+
+### Non-browser environments
+
+webrtc-datachannel tries to obtain the WebRTC API objects `RTCPeerConnection`, `RTCSessionDescription` and `RTCIceCandidate` from the global object and complains otherwise.
+
+If you're in Node.js or React Native, you can provide a WebRTC implementation this way:
+
+```js
+// in Node.js
+const wrtc = require("wrtc");
+
+// in React Native
+const wrtc = require("react-native-webrtc");
+
+// ...
+const peer = await datachannel("CHANNELID", {
+  signalServerUrl: "...",
+  wrtc // an object: { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate }
+});
 ```
 
 ## References
