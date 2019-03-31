@@ -11,8 +11,8 @@ module.exports = function dataChannel (channelId, config, onData = noop) {
   if (!channelId) {
     throw new Error('channelId required')
   }
-  if (!/^\w+$/.test(channelId)) {
-    throw new Error('channelId must be alphanumeric')
+  if (!/^[0-9A-z-]+$/.test(channelId)) {
+    throw new Error('channelId must be alphanumeric (incl. minus)')
   }
 
   config = {

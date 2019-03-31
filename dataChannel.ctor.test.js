@@ -4,7 +4,7 @@ const fixture = require('./signal-server.fixture')(test)
 const dataChannel = require('./dataChannel')
 
 test('creates datachannel', async t => {
-  await Promise.all([dataChannel('A', config()), dataChannel('A', config())])
+  await Promise.all([dataChannel('A-B', config()), dataChannel('A-B', config())])
   t.pass()
 })
 
@@ -15,7 +15,7 @@ test('requires channelId', t => {
 
 test('alphanumeric channelId', t => {
   const error = t.throws(() => dataChannel('#'))
-  t.is(error.message, 'channelId must be alphanumeric')
+  t.is(error.message, 'channelId must be alphanumeric (incl. minus)')
 })
 
 test('requires config.wrtc', t => {
